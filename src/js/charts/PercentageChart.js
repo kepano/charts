@@ -1,127 +1,91 @@
-import BaseChart from './BaseChart';
-import { $, offset } from '../utils/dom';
+import AggregationChart from './AggregationChart';
+import { getOffset } from '../utils/dom';
+import { getComponent } from '../objects/ChartComponents';
+import { PERCENTAGE_BAR_DEFAULT_HEIGHT, PERCENTAGE_BAR_DEFAULT_DEPTH } from '../utils/constants';
 
-export default class PercentageChart extends BaseChart {
-	constructor(args) {
-		super(args);
+export default class PercentageChart extends AggregationChart {
+	constructor(parent, args) {
+		super(parent, args);
 		this.type = 'percentage';
-
-		this.max_slices = 10;
-		this.max_legend_points = 6;
-
 		this.setup();
 	}
 
-	make_chart_area() {
-		this.chart_wrapper.className += ' ' + 'graph-focus-margin';
-		this.chart_wrapper.style.marginTop = '45px';
+	setMeasures(options) {
+		let m = this.measures;
+		this.barOptions = options.barOptions || {};
 
-		this.stats_wrapper.className += ' ' + 'graph-focus-margin';
-		this.stats_wrapper.style.marginBottom = '30px';
-		this.stats_wrapper.style.paddingTop = '0px';
+		let b = this.barOptions;
+		b.height = b.height || PERCENTAGE_BAR_DEFAULT_HEIGHT;
+		b.depth = b.depth || PERCENTAGE_BAR_DEFAULT_DEPTH;
+
+		m.paddings.right = 30;
+		m.legendHeight = 80;
+		m.baseHeight = (b.height + b.depth * 0.5) * 8;
 	}
 
-	make_draw_area() {
-		this.chart_div = $.create('div', {
-			className: 'div',
-			inside: this.chart_wrapper
-		});
+	setupComponents() {
+		let s = this.state;
 
-		this.chart = $.create('div', {
-			className: 'progress-chart',
-			inside: this.chart_div
-		});
+		let componentConfigs = [
+			[
+				'percentageBars',
+				{
+					barHeight: this.barOptions.height,
+					barDepth: this.barOptions.depth,
+				},
+				function() {
+					return {
+						xPositions: s.xPositions,
+						widths: s.widths,
+						colors: this.colors
+					};
+				}.bind(this)
+			]
+		];
+
+		this.components = new Map(componentConfigs
+			.map(args => {
+				let component = getComponent(...args);
+				return [args[0], component];
+			}));
 	}
 
-	setup_components() {
-		this.percentage_bar = $.create('div', {
-			className: 'progress',
-			inside: this.chart
-		});
-	}
+	calc() {
+		super.calc();
+		let s = this.state;
 
-	setup_values() {
-		this.slice_totals = [];
-		let all_totals = this.data.labels.map((d, i) => {
-			let total = 0;
-			this.data.datasets.map(e => {
-				total += e.values[i];
-			});
-			return [total, d];
-		}).filter(d => { return d[0] > 0; }); // keep only positive results
+		s.xPositions = [];
+		s.widths = [];
 
-		let totals = all_totals;
-
-		if(all_totals.length > this.max_slices) {
-			all_totals.sort((a, b) => { return b[0] - a[0]; });
-
-			totals = all_totals.slice(0, this.max_slices-1);
-			let others = all_totals.slice(this.max_slices-1);
-
-			let sum_of_others = 0;
-			others.map(d => {sum_of_others += d[0];});
-
-			totals.push([sum_of_others, 'Rest']);
-
-			this.colors[this.max_slices-1] = 'grey';
-		}
-
-		this.labels = [];
-		totals.map(d => {
-			this.slice_totals.push(d[0]);
-			this.labels.push(d[1]);
-		});
-
-		this.legend_totals = this.slice_totals.slice(0, this.max_legend_points);
-	}
-
-	make_graph_components() {
-		this.grand_total = this.slice_totals.reduce((a, b) => a + b, 0);
-		this.slices = [];
-		this.slice_totals.map((total, i) => {
-			let slice = $.create('div', {
-				className: `progress-bar`,
-				inside: this.percentage_bar,
-				styles: {
-					background: this.colors[i],
-					width: total*100/this.grand_total + "%"
-				}
-			});
-			this.slices.push(slice);
+		let xPos = 0;
+		s.sliceTotals.map((value) => {
+			let width = this.width * value / s.grandTotal;
+			s.widths.push(width);
+			s.xPositions.push(xPos);
+			xPos += width;
 		});
 	}
 
-	bind_tooltip() {
-		this.slices.map((slice, i) => {
-			slice.addEventListener('mouseenter', () => {
-				let g_off = offset(this.chart_wrapper), p_off = offset(slice);
+	makeDataByIndex() { }
 
-				let x = p_off.left - g_off.left + slice.offsetWidth/2;
-				let y = p_off.top - g_off.top - 6;
-				let title = (this.formatted_labels && this.formatted_labels.length>0
-					? this.formatted_labels[i] : this.labels[i]) + ': ';
-				let percent = (this.slice_totals[i]*100/this.grand_total).toFixed(1);
+	bindTooltip() {
+		let s = this.state;
+		this.container.addEventListener('mousemove', (e) => {
+			let bars = this.components.get('percentageBars').store;
+			let bar = e.target;
+			if(bars.includes(bar)) {
 
-				this.tip.set_values(x, y, title, percent + "%");
-				this.tip.show_tip();
-			});
-		});
-	}
+				let i = bars.indexOf(bar);
+				let gOff = getOffset(this.container), pOff = getOffset(bar);
 
-	show_summary() {
-		let x_values = this.formatted_labels && this.formatted_labels.length > 0
-			? this.formatted_labels : this.labels;
-		this.legend_totals.map((d, i) => {
-			if(d) {
-				let stats = $.create('div', {
-					className: 'stats',
-					inside: this.stats_wrapper
-				});
-				stats.innerHTML = `<span class="indicator">
-					<i style="background: ${this.colors[i]}"></i>
-					<span class="text-muted">${x_values[i]}:</span>
-					${d}
-				</span>`;
+				let x = pOff.left - gOff.left + parseInt(bar.getAttribute('width'))/2;
+				let y = pOff.top - gOff.top;
+				let title = (this.formattedLabels && this.formattedLabels.length>0
+					? this.formattedLabels[i] : this.state.labels[i]) + ': ';
+				let fraction = s.sliceTotals[i]/s.grandTotal;
+
+				this.tip.setValues(x, y, {name: title, value: (fraction*100).toFixed(1) + "%"});
+				this.tip.showTip();
 			}
 		});
 	}

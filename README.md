@@ -1,6 +1,8 @@
 <div align="center">
-    <img src="https://github.com/frappe/design/blob/master/logos/frappe-charts-symbol.svg" height="128">
-    <h2>Frappé Charts</h2>
+    <img src="https://github.com/frappe/design/blob/master/logos/charts-logo.svg" height="128">
+    <a href="https://frappe.github.io/charts">
+        <h2>Frappe Charts</h2>
+    </a>
     <p align="center">
         <p>GitHub-inspired modern, intuitive and responsive charts with zero dependencies</p>
         <a href="https://frappe.github.io/charts">
@@ -10,8 +12,14 @@
 </div>
 
 <p align="center">
+    <a href="https://travis-ci.org/frappe/charts">
+        <img src="https://img.shields.io/travis/frappe/charts.svg?style=flat-square">
+    </a>
     <a href="http://github.com/frappe/charts/tree/master/dist/js/frappe-charts.min.iife.js">
         <img src="http://img.badgesize.io/frappe/charts/master/dist/frappe-charts.min.iife.js.svg?compression=gzip">
+    </a>
+    <a href="https://travis-ci.org/frappe/charts">
+        <img src="https://img.shields.io/travis/frappe/charts.svg?style=flat-square">
     </a>
 </p>
 
@@ -36,15 +44,15 @@
 
   and include in your project:
   ```js
-  import Chart from "frappe-charts/dist/frappe-charts.min.esm"
+  import { Chart } from "frappe-charts"
   ```
 
 * ...or include within your HTML
 
   ```html
-    <script src="https://cdn.jsdelivr.net/npm/frappe-charts@0.0.8/dist/frappe-charts.min.iife.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/frappe-charts@1.1.0/dist/frappe-charts.min.iife.js"></script>
     <!-- or -->
-    <script src="https://unpkg.com/frappe-charts@0.0.8/dist/frappe-charts.min.iife.js"></script>
+    <script src="https://unpkg.com/frappe-charts@1.1.0/dist/frappe-charts.min.iife.js"></script>
   ```
 
 #### Usage
@@ -55,27 +63,23 @@ const data = {
     ],
     datasets: [
         {
-            title: "Some Data",
+            name: "Some Data", type: "bar",
             values: [25, 40, 30, 35, 8, 52, 17, -4]
         },
         {
-            title: "Another Set",
+            name: "Another Set", type: "line",
             values: [25, 50, -10, 15, 18, 32, 27, 14]
         }
     ]
 }
 
-const chart = new Chart({
-    parent: "#chart", // or a DOM element
+const chart = new frappe.Chart("#chart", {  // or a DOM element,
+                                            // new Chart() in case of ES6 module with above usage
     title: "My Awesome Chart",
     data: data,
-    type: 'bar', // or 'line', 'scatter', 'pie', 'percentage'
+    type: 'axis-mixed', // or 'bar', 'line', 'scatter', 'pie', 'percentage'
     height: 250,
-
-    colors: ['#7cd6fd', '#743ee2'],
-
-    format_tooltip_x: d => (d + '').toUpperCase(),
-    format_tooltip_y: d => d + ' pts'
+    colors: ['#7cd6fd', '#743ee2']
 })
 ```
 
@@ -87,6 +91,16 @@ If you want to contribute:
 4. `npm run dev`
 
 #### Updates
+
+##### v1.0.0
+- Major rewrite out. Some new features include:
+    - Mixed type axis datasets
+    - Stacked bar charts
+    - Value over data points
+    - Y Markers and regions
+    - Dot size, Bar space size, and other options
+    - Legend for axis charts
+- We would be looking to incorporate existing PRs and issues in the meantime.
 
 ##### Please read [#93](https://github.com/frappe/charts/issues/93) for v0.1.0 updates on rework and development.
 

@@ -43,7 +43,7 @@ $.create = (tag, o) => {
 	return element;
 };
 
-export function offset(element) {
+export function getOffset(element) {
 	let rect = element.getBoundingClientRect();
 	return {
 		// https://stackoverflow.com/a/7436602/6495043
@@ -74,7 +74,7 @@ export function getElementContentWidth(element) {
 	return element.clientWidth - padding;
 }
 
-$.bind = (element, o) => {
+export function bind(element, o){
 	if (element) {
 		for (var event in o) {
 			var callback = o[event];
@@ -84,9 +84,9 @@ $.bind = (element, o) => {
 			});
 		}
 	}
-};
+}
 
-$.unbind = (element, o) => {
+export function unbind(element, o){
 	if (element) {
 		for (var event in o) {
 			var callback = o[event];
@@ -96,9 +96,9 @@ $.unbind = (element, o) => {
 			});
 		}
 	}
-};
+}
 
-$.fire = (target, type, properties) => {
+export function fire(target, type, properties) {
 	var evt = document.createEvent("HTMLEvents");
 
 	evt.initEvent(type, true, true );
@@ -108,4 +108,23 @@ $.fire = (target, type, properties) => {
 	}
 
 	return target.dispatchEvent(evt);
-};
+}
+
+// https://css-tricks.com/snippets/javascript/loop-queryselectorall-matches/
+export function forEachNode(nodeList, callback, scope) {
+	if(!nodeList) return;
+	for (var i = 0; i < nodeList.length; i++) {
+		callback.call(scope, nodeList[i], i);
+	}
+}
+
+export function activate($parent, $child, commonClass, activeClass='active', index = -1) {
+	let $children = $parent.querySelectorAll(`.${commonClass}.${activeClass}`);
+
+	forEachNode($children, (node, i) => {
+		if(index >= 0 && i <= index) return;
+		node.classList.remove(activeClass);
+	});
+
+	$child.classList.add(activeClass);
+}

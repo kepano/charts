@@ -1,4 +1,5 @@
 import { $ } from '../utils/dom';
+import { TOOLTIP_POINTER_TRIANGLE_HEIGHT } from '../utils/constants';
 
 export default class SvgTip {
 	constructor({
@@ -7,10 +8,10 @@ export default class SvgTip {
 	}) {
 		this.parent = parent;
 		this.colors = colors;
-		this.title_name = '';
-		this.title_value = '';
-		this.list_values = [];
-		this.title_value_first = 0;
+		this.titleName = '';
+		this.titleValue = '';
+		this.listValues = [];
+		this.titleValueFirst = 0;
 
 		this.x = 0;
 		this.y = 0;
@@ -22,16 +23,15 @@ export default class SvgTip {
 	}
 
 	setup() {
-		this.make_tooltip();
+		this.makeTooltip();
 	}
 
 	refresh() {
 		this.fill();
-		this.calc_position();
-		// this.show_tip();
+		this.calcPosition();
 	}
 
-	make_tooltip() {
+	makeTooltip() {
 		this.container = $.create('div', {
 			inside: this.parent,
 			className: 'graph-svg-tip comparison',
@@ -39,81 +39,87 @@ export default class SvgTip {
 				<ul class="data-point-list"></ul>
 				<div class="svg-pointer"></div>`
 		});
-		this.hide_tip();
+		this.hideTip();
 
 		this.title = this.container.querySelector('.title');
-		this.data_point_list = this.container.querySelector('.data-point-list');
+		this.dataPointList = this.container.querySelector('.data-point-list');
 
 		this.parent.addEventListener('mouseleave', () => {
-			this.hide_tip();
+			this.hideTip();
 		});
 	}
 
 	fill() {
 		let title;
-		if(this.title_value_first) {
-			title = `<strong>${this.title_value}</strong>${this.title_name}`;
+		if(this.index) {
+			this.container.setAttribute('data-point-index', this.index);
+		}
+		if(this.titleValueFirst) {
+			title = `<strong>${this.titleValue}</strong>${this.titleName}`;
 		} else {
-			title = `${this.title_name}<strong>${this.title_value}</strong>`;
+			title = `${this.titleName}<strong>${this.titleValue}</strong>`;
 		}
 		this.title.innerHTML = title;
-		this.data_point_list.innerHTML = '';
+		this.dataPointList.innerHTML = '';
 
-		this.list_values.map((set, i) => {
+		this.listValues.map((set, i) => {
 			const color = this.colors[i] || 'black';
+			let value = set.formatted === 0 || set.formatted ? set.formatted : set.value;
 
 			let li = $.create('li', {
 				styles: {
 					'border-top': `3px solid ${color}`
 				},
-				innerHTML: `<strong style="display: block;">${ set.value === 0 || set.value ? set.value : '' }</strong>
+				innerHTML: `<strong style="display: block;">${ value === 0 || value ? value : '' }</strong>
 					${set.title ? set.title : '' }`
 			});
 
-			this.data_point_list.appendChild(li);
+			this.dataPointList.appendChild(li);
 		});
 	}
 
-	calc_position() {
+	calcPosition() {
 		let width = this.container.offsetWidth;
 
-		this.top = this.y - this.container.offsetHeight;
+		this.top = this.y - this.container.offsetHeight
+			- TOOLTIP_POINTER_TRIANGLE_HEIGHT;
 		this.left = this.x - width/2;
-		let max_left = this.parent.offsetWidth - width;
+		let maxLeft = this.parent.offsetWidth - width;
 
 		let pointer = this.container.querySelector('.svg-pointer');
 
 		if(this.left < 0) {
 			pointer.style.left = `calc(50% - ${-1 * this.left}px)`;
 			this.left = 0;
-		} else if(this.left > max_left) {
-			let delta = this.left - max_left;
-			let pointer_offset = `calc(50% + ${delta}px)`;
-			pointer.style.left = pointer_offset;
+		} else if(this.left > maxLeft) {
+			let delta = this.left - maxLeft;
+			let pointerOffset = `calc(50% + ${delta}px)`;
+			pointer.style.left = pointerOffset;
 
-			this.left = max_left;
+			this.left = maxLeft;
 		} else {
 			pointer.style.left = `50%`;
 		}
 	}
 
-	set_values(x, y, title_name = '', title_value = '', list_values = [], title_value_first = 0) {
-		this.title_name = title_name;
-		this.title_value = title_value;
-		this.list_values = list_values;
+	setValues(x, y, title = {}, listValues = [], index = -1) {
+		this.titleName = title.name;
+		this.titleValue = title.value;
+		this.listValues = listValues;
 		this.x = x;
 		this.y = y;
-		this.title_value_first = title_value_first;
+		this.titleValueFirst = title.valueFirst || 0;
+		this.index = index;
 		this.refresh();
 	}
 
-	hide_tip() {
+	hideTip() {
 		this.container.style.top = '0px';
 		this.container.style.left = '0px';
 		this.container.style.opacity = '0';
 	}
 
-	show_tip() {
+	showTip() {
 		this.container.style.top = this.top + 'px';
 		this.container.style.left = this.left + 'px';
 		this.container.style.opacity = '1';

@@ -1,304 +1,316 @@
 import SvgTip from '../objects/SvgTip';
 import { $, isElementInViewport, getElementContentWidth } from '../utils/dom';
-import { makeSVGContainer, makeSVGDefs, makeSVGGroup } from '../utils/draw';
-import { getStringWidth } from '../utils/helpers';
-import { getColor, DEFAULT_COLORS } from '../utils/colors';
-import Chart from '../charts';
+import { makeSVGContainer, makeSVGDefs, makeSVGGroup, makeText } from '../utils/draw';
+import { BASE_MEASURES, getExtraHeight, getExtraWidth, getTopOffset, getLeftOffset,
+	INIT_CHART_UPDATE_TIMEOUT, CHART_POST_ANIMATE_TIMEOUT, DEFAULT_COLORS} from '../utils/constants';
+import { getColor, isValidColor } from '../utils/colors';
+import { runSMILAnimation } from '../utils/animation';
+import { downloadFile, prepareForExport } from '../utils/export';
 
-const ALL_CHART_TYPES = ['line', 'scatter', 'bar', 'percentage', 'heatmap', 'pie'];
-
-const COMPATIBLE_CHARTS = {
-	bar: ['line', 'scatter', 'percentage', 'pie'],
-	line: ['scatter', 'bar', 'percentage', 'pie'],
-	pie: ['line', 'scatter', 'percentage', 'bar'],
-	scatter: ['line', 'bar', 'percentage', 'pie'],
-	percentage: ['bar', 'line', 'scatter', 'pie'],
-	heatmap: []
-};
-
-// TODO: Needs structure as per only labels/datasets
-const COLOR_COMPATIBLE_CHARTS = {
-	bar: ['line', 'scatter'],
-	line: ['scatter', 'bar'],
-	pie: ['percentage'],
-	scatter: ['line', 'bar'],
-	percentage: ['pie'],
-	heatmap: []
-};
+let BOUND_DRAW_FN;
 
 export default class BaseChart {
-	constructor({
-		height = 240,
+	constructor(parent, options) {
 
-		title = '',
-		subtitle = '',
-		colors = [],
-		summary = [],
+		this.parent = typeof parent === 'string'
+			? document.querySelector(parent)
+			: parent;
 
-		is_navigable = 0,
-		has_legend = 0,
-
-		type = '',
-
-		parent,
-		data
-	}) {
-		this.raw_chart_args = arguments[0];
-
-		this.parent = typeof parent === 'string' ? document.querySelector(parent) : parent;
-		this.title = title;
-		this.subtitle = subtitle;
-
-		this.data = data;
-
-		this.specific_values = data.specific_values || [];
-		this.summary = summary;
-
-		this.is_navigable = is_navigable;
-		if(this.is_navigable) {
-			this.current_index = 0;
-		}
-		this.has_legend = has_legend;
-
-		this.setColors(colors, type);
-		this.set_margins(height);
-	}
-
-	get_different_chart(type) {
-		if(type === this.type) return;
-
-		if(!ALL_CHART_TYPES.includes(type)) {
-			console.error(`'${type}' is not a valid chart type.`);
+		if (!(this.parent instanceof HTMLElement)) {
+			throw new Error('No `parent` element to render on was provided.');
 		}
 
-		if(!COMPATIBLE_CHARTS[this.type].includes(type)) {
-			console.error(`'${this.type}' chart cannot be converted to a '${type}' chart.`);
+		this.rawChartArgs = options;
+
+		this.title = options.title || '';
+		this.type = options.type || '';
+
+		this.realData = this.prepareData(options.data);
+		this.data = this.prepareFirstData(this.realData);
+
+		this.colors = this.validateColors(options.colors, this.type);
+
+		this.config = {
+			showTooltip: 1, // calculate
+			showLegend: 1, // calculate
+			isNavigable: options.isNavigable || 0,
+			animate: 1
+		};
+
+		this.measures = JSON.parse(JSON.stringify(BASE_MEASURES));
+		let m = this.measures;
+		this.setMeasures(options);
+		if(!this.title.length) { m.titleHeight = 0; }
+		if(!this.config.showLegend) m.legendHeight = 0;
+		this.argHeight = options.height || m.baseHeight;
+
+		this.state = {};
+		this.options = {};
+
+		this.initTimeout = INIT_CHART_UPDATE_TIMEOUT;
+
+		if(this.config.isNavigable) {
+			this.overlays = [];
 		}
 
-		// whether the new chart can use the existing colors
-		const use_color = COLOR_COMPATIBLE_CHARTS[this.type].includes(type);
-
-		// Okay, this is anticlimactic
-		// this function will need to actually be 'change_chart_type(type)'
-		// that will update only the required elements, but for now ...
-		return new Chart({
-			parent: this.raw_chart_args.parent,
-			title: this.title,
-			data: this.raw_chart_args.data,
-			type: type,
-			height: this.raw_chart_args.height,
-			colors: use_color ? this.colors : undefined
-		});
+		this.configure(options);
 	}
 
-	setColors(colors, type) {
-		this.colors = colors;
-
-		// TODO: Needs structure as per only labels/datasets
-		const list = type === 'percentage' || type === 'pie'
-			? this.data.labels
-			: this.data.datasets;
-
-		if(!this.colors || (list && this.colors.length < list.length)) {
-			this.colors = DEFAULT_COLORS;
-		}
-
-		this.colors = this.colors.map(color => getColor(color));
+	prepareData(data) {
+		return data;
 	}
 
-	set_margins(height) {
-		this.base_height = height;
-		this.height = height - 40;
-		this.translate_x = 60;
-		this.translate_y = 10;
+	prepareFirstData(data) {
+		return data;
 	}
 
-	setup() {
-		if(!this.parent) {
-			console.error("No parent element to render on was provided.");
-			return;
-		}
-		if(this.validate_and_prepare_data()) {
-			this.bind_window_events();
-			this.refresh(true);
-		}
-	}
-
-	validate_and_prepare_data() {
-		return true;
-	}
-
-	bind_window_events() {
-		window.addEventListener('resize', () => this.refresh());
-		window.addEventListener('orientationchange', () => this.refresh());
-	}
-
-	refresh(init=false) {
-		this.setup_base_values();
-		this.set_width();
-
-		this.setup_container();
-		this.setup_components();
-
-		this.setup_values();
-		this.setup_utils();
-
-		this.make_graph_components(init);
-		this.make_tooltip();
-
-		if(this.summary.length > 0) {
-			this.show_custom_summary();
-		} else {
-			this.show_summary();
-		}
-
-		if(this.is_navigable) {
-			this.setup_navigation(init);
-		}
-	}
-
-	set_width() {
-		let special_values_width = 0;
-		let char_width = 8;
-		this.specific_values.map(val => {
-			let str_width = getStringWidth((val.title + ""), char_width);
-			if(str_width > special_values_width) {
-				special_values_width = str_width - 40;
+	validateColors(colors, type) {
+		const validColors = [];
+		colors = (colors || []).concat(DEFAULT_COLORS[type]);
+		colors.forEach((string) => {
+			const color = getColor(string);
+			if(!isValidColor(color)) {
+				console.warn('"' + string + '" is not a valid color.');
+			} else {
+				validColors.push(color);
 			}
 		});
-		this.base_width = getElementContentWidth(this.parent) - special_values_width;
-		this.width = this.base_width - this.translate_x * 2;
+		return validColors;
 	}
 
-	setup_base_values() {}
+	setMeasures() {
+		// Override measures, including those for title and legend
+		// set config for legend and title
+	}
 
-	setup_container() {
-		this.container = $.create('div', {
-			className: 'chart-container',
-			innerHTML: `<h6 class="title">${this.title}</h6>
-				<h6 class="sub-title uppercase">${this.subtitle}</h6>
-				<div class="frappe-chart graphics"></div>
-				<div class="graph-stats-container"></div>`
-		});
+	configure() {
+		let height = this.argHeight;
+		this.baseHeight = height;
+		this.height = height - getExtraHeight(this.measures);
 
+		// Bind window events
+		BOUND_DRAW_FN = this.boundDrawFn.bind(this);
+		window.addEventListener('resize', BOUND_DRAW_FN);
+		window.addEventListener('orientationchange', this.boundDrawFn.bind(this));
+	}
+
+	boundDrawFn() {
+		this.draw(true);
+	}
+
+	unbindWindowEvents() {
+		window.removeEventListener('resize', BOUND_DRAW_FN);
+		window.removeEventListener('orientationchange', this.boundDrawFn.bind(this));
+	}
+
+	// Has to be called manually
+	setup() {
+		this.makeContainer();
+		this.updateWidth();
+		this.makeTooltip();
+
+		this.draw(false, true);
+	}
+
+	makeContainer() {
 		// Chart needs a dedicated parent element
 		this.parent.innerHTML = '';
-		this.parent.appendChild(this.container);
 
-		this.chart_wrapper = this.container.querySelector('.frappe-chart');
-		this.stats_wrapper = this.container.querySelector('.graph-stats-container');
+		let args = {
+			inside: this.parent,
+			className: 'chart-container'
+		};
 
-		this.make_chart_area();
-		this.make_draw_area();
+		if(this.independentWidth) {
+			args.styles = { width: this.independentWidth + 'px' };
+		}
+
+		this.container = $.create('div', args);
 	}
 
-	make_chart_area() {
-		this.svg = makeSVGContainer(
-			this.chart_wrapper,
-			'chart',
-			this.base_width,
-			this.base_height
-		);
-		this.svg_defs = makeSVGDefs(this.svg);
-		return this.svg;
-	}
-
-	make_draw_area() {
-		this.draw_area = makeSVGGroup(
-			this.svg,
-			this.type + '-chart',
-			`translate(${this.translate_x}, ${this.translate_y})`
-		);
-	}
-
-	setup_components() { }
-
-	make_tooltip() {
+	makeTooltip() {
 		this.tip = new SvgTip({
-			parent: this.chart_wrapper,
+			parent: this.container,
 			colors: this.colors
 		});
-		this.bind_tooltip();
+		this.bindTooltip();
 	}
 
+	bindTooltip() {}
 
-	show_summary() {}
-	show_custom_summary() {
-		this.summary.map(d => {
-			let stats = $.create('div', {
-				className: 'stats',
-				innerHTML: `<span class="indicator">
-					<i style="background:${d.color}"></i>
-					${d.title}: ${d.value}
-				</span>`
-			});
-			this.stats_wrapper.appendChild(stats);
-		});
-	}
+	draw(onlyWidthChange=false, init=false) {
+		this.updateWidth();
 
-	setup_navigation(init=false) {
-		this.make_overlay();
+		this.calc(onlyWidthChange);
+		this.makeChartArea();
+		this.setupComponents();
+
+		this.components.forEach(c => c.setup(this.drawArea));
+		// this.components.forEach(c => c.make());
+		this.render(this.components, false);
 
 		if(init) {
-			this.bind_overlay();
+			this.data = this.realData;
+			setTimeout(() => {this.update(this.data);}, this.initTimeout);
+		}
+
+		this.renderLegend();
+
+		this.setupNavigation(init);
+	}
+
+	calc() {} // builds state
+
+	updateWidth() {
+		this.baseWidth = getElementContentWidth(this.parent);
+		this.width = this.baseWidth - getExtraWidth(this.measures);
+	}
+
+	makeChartArea() {
+		if(this.svg) {
+			this.container.removeChild(this.svg);
+		}
+		let m = this.measures;
+
+		this.svg = makeSVGContainer(
+			this.container,
+			'frappe-chart chart',
+			this.baseWidth,
+			this.baseHeight
+		);
+		this.svgDefs = makeSVGDefs(this.svg);
+
+		if(this.title.length) {
+			this.titleEL = makeText(
+				'title',
+				m.margins.left,
+				m.margins.top,
+				this.title,
+				{
+					fontSize: m.titleFontSize,
+					fill: '#666666',
+					dy: m.titleFontSize
+				}
+			);
+		}
+
+		let top = getTopOffset(m);
+		this.drawArea = makeSVGGroup(
+			this.type + '-chart chart-draw-area',
+			`translate(${getLeftOffset(m)}, ${top})`
+		);
+
+		if(this.config.showLegend) {
+			top += this.height + m.paddings.bottom;
+			this.legendArea = makeSVGGroup(
+				'chart-legend',
+				`translate(${getLeftOffset(m)}, ${top})`
+			);
+		}
+
+		if(this.title.length) { this.svg.appendChild(this.titleEL); }
+		this.svg.appendChild(this.drawArea);
+		if(this.config.showLegend) { this.svg.appendChild(this.legendArea); }
+
+		this.updateTipOffset(getLeftOffset(m), getTopOffset(m));
+	}
+
+	updateTipOffset(x, y) {
+		this.tip.offset = {
+			x: x,
+			y: y
+		};
+	}
+
+	setupComponents() { this.components = new Map(); }
+
+	update(data) {
+		if(!data) {
+			console.error('No data to update.');
+		}
+		this.data = this.prepareData(data);
+		this.calc(); // builds state
+		this.render();
+	}
+
+	render(components=this.components, animate=true) {
+		if(this.config.isNavigable) {
+			// Remove all existing overlays
+			this.overlays.map(o => o.parentNode.removeChild(o));
+			// ref.parentNode.insertBefore(element, ref);
+		}
+		let elementsToAnimate = [];
+		// Can decouple to this.refreshComponents() first to save animation timeout
+		components.forEach(c => {
+			elementsToAnimate = elementsToAnimate.concat(c.update(animate));
+		});
+		if(elementsToAnimate.length > 0) {
+			runSMILAnimation(this.container, this.svg, elementsToAnimate);
+			setTimeout(() => {
+				components.forEach(c => c.make());
+				this.updateNav();
+			}, CHART_POST_ANIMATE_TIMEOUT);
+		} else {
+			components.forEach(c => c.make());
+			this.updateNav();
+		}
+	}
+
+	updateNav() {
+		if(this.config.isNavigable) {
+			this.makeOverlay();
+			this.bindUnits();
+		}
+	}
+
+	renderLegend() {}
+
+	setupNavigation(init=false) {
+		if(!this.config.isNavigable) return;
+
+		if(init) {
+			this.bindOverlay();
+
+			this.keyActions = {
+				'13': this.onEnterKey.bind(this),
+				'37': this.onLeftArrow.bind(this),
+				'38': this.onUpArrow.bind(this),
+				'39': this.onRightArrow.bind(this),
+				'40': this.onDownArrow.bind(this),
+			};
 
 			document.addEventListener('keydown', (e) => {
-				if(isElementInViewport(this.chart_wrapper)) {
+				if(isElementInViewport(this.container)) {
 					e = e || window.event;
-
-					if (e.keyCode == '37') {
-						this.on_left_arrow();
-					} else if (e.keyCode == '39') {
-						this.on_right_arrow();
-					} else if (e.keyCode == '38') {
-						this.on_up_arrow();
-					} else if (e.keyCode == '40') {
-						this.on_down_arrow();
-					} else if (e.keyCode == '13') {
-						this.on_enter_key();
+					if(this.keyActions[e.keyCode]) {
+						this.keyActions[e.keyCode]();
 					}
 				}
 			});
 		}
 	}
 
-	make_overlay() {}
-	bind_overlay() {}
-	bind_units() {}
+	makeOverlay() {}
+	updateOverlay() {}
+	bindOverlay() {}
+	bindUnits() {}
 
-	on_left_arrow() {}
-	on_right_arrow() {}
-	on_up_arrow() {}
-	on_down_arrow() {}
-	on_enter_key() {}
+	onLeftArrow() {}
+	onRightArrow() {}
+	onUpArrow() {}
+	onDownArrow() {}
+	onEnterKey() {}
 
-	get_data_point(index=this.current_index) {
-		// check for length
-		let data_point = {
-			index: index
-		};
-		let y = this.y[0];
-		['svg_units', 'y_tops', 'values'].map(key => {
-			let data_key = key.slice(0, key.length-1);
-			data_point[data_key] = y[key][index];
-		});
-		data_point.label = this.x[index];
-		return data_point;
-	}
+	addDataPoint() {}
+	removeDataPoint() {}
 
-	update_current_data_point(index) {
-		index = parseInt(index);
-		if(index < 0) index = 0;
-		if(index >= this.x.length) index = this.x.length - 1;
-		if(index === this.current_index) return;
-		this.current_index = index;
-		$.fire(this.parent, "data-select", this.get_data_point());
-	}
+	getDataPoint() {}
+	setCurrentDataPoint() {}
 
-	// Objects
-	setup_utils() { }
+	updateDataset() {}
 
-	makeDrawAreaComponent(className, transform='') {
-		return makeSVGGroup(this.draw_area, className, transform);
+	export() {
+		let chartSvg = prepareForExport(this.svg);
+		downloadFile(this.title || 'Chart', [chartSvg]);
 	}
 }
